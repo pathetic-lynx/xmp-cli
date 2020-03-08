@@ -276,12 +276,14 @@ void info_frame(struct xmp_module_info *mi, struct xmp_frame_info *fi, struct co
 		spd = fi->speed;
 	}
 
+	memset(buf, 0, 540);
 	const unsigned channels = mi->mod->chn;
 	for (int i = 0; i < channels; i++) {
 	    int track = mi->mod->xxp[fi->pattern]->index[i];
 	    unsigned char r, g, b;
 	    unsigned char h, s, v;
-	    h = (mi->mod->xxt[track]->event[fi->row].note%12)*21;;
+	    struct xmp_channel_info* c_info = &mi->mod->xxt[track]->event[fi->row];
+	    h = (c_info->note+c_info->instrument+c_info->sample %16)*16;;
 	    v = mi->mod->xxt[track]->event[fi->row].vol;
 	    v = 255;
 	    s = 255;
