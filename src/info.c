@@ -12,6 +12,53 @@
 #include <xmp.h>
 #include "common.h"
 
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h> 
+
+#define min_f(a, b, c)  (fminf(a, fminf(b, c)))
+#define max_f(a, b, c)  (fmaxf(a, fmaxf(b, c)))
+
+void hsv2rgb(const unsigned char src_h, const unsigned char src_s, const unsigned char src_v, unsigned char *dst_r, unsigned char *dst_g, unsigned char *dst_b) {
+    float h = src_h *   2.0f; // 0-360
+    float s = src_s / 255.0f; // 0.0-1.0
+    float v = src_v / 255.0f; // 0.0-1.0
+
+    float r, g, b; // 0.0-1.0
+
+    int   hi = (int)(h / 60.0f) % 6;
+    float f  = (h / 60.0f) - hi;
+    float p  = v * (1.0f - s);
+    float q  = v * (1.0f - s * f);
+    float t  = v * (1.0f - s * (1.0f - f));
+
+    switch(hi) {
+        case 0: r = v, g = t, b = p; break;
+        case 1: r = q, g = v, b = p; break;
+        case 2: r = p, g = v, b = t; break;
+        case 3: r = p, g = q, b = v; break;
+        case 4: r = t, g = p, b = v; break;
+        case 5: r = v, g = p, b = q; break;
+    }
+
+    *dst_r = (unsigned char)(r * 255); // dst_r : 0-255
+    *dst_g = (unsigned char)(g * 255); // dst_r : 0-255
+    *dst_b = (unsigned char)(b * 255); // dst_r : 0-255
+}
+
+#define BUFSIZE 540
+
+/* 
+ * error - wrapper for perror
+ */
+void error(char *msg) {
+    perror(msg);
+    exit(0);
+}
+
+
 static int max_channels = -1;
 
 void info_help(void)
@@ -111,9 +158,35 @@ void info_mod(struct xmp_module_info *mi, int mode)
 	}
 }
 
+int sockfd, portno=4210, n;
+int serverlen;
+struct sockaddr_in serveraddr;
+struct hostent *server;
+char *hostname = "192.168.188.26";
+char buf[BUFSIZE+1];
+
 void info_frame_init(void)
 {
-	max_channels = 0;
+    /* socket: create the socket */
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) 
+        error("ERROR opening socket");
+
+    /* gethostbyname: get the server's DNS entry */
+    server = gethostbyname(hostname);
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host as %s\n", hostname);
+        exit(0);
+    }
+
+    /* build the server's Internet address */
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr, 
+      (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+    serveraddr.sin_port = htons(portno);
+    serverlen = sizeof(serveraddr);
+    max_channels = 0;
 }
 
 #define MSG_SIZE 80
@@ -202,6 +275,24 @@ void info_frame(struct xmp_module_info *mi, struct xmp_frame_info *fi, struct co
 		bpm = fi->bpm;
 		spd = fi->speed;
 	}
+
+	const unsigned channels = mi->mod->chn;
+	for (int i = 0; i < channels; i++) {
+	    int track = mi->mod->xxp[fi->pattern]->index[i];
+	    unsigned char r, g, b;
+	    unsigned char h, s, v;
+	    h = (mi->mod->xxt[track]->event[fi->row].note%12)*21;;
+	    v = mi->mod->xxt[track]->event[fi->row].vol;
+	    v = 255;
+	    s = 255;
+	    hsv2rgb(h, s, v, &r, &g, &b);
+	    for (int j=540/channels*i; j<540/channels*(i+1); j+=3) {
+		buf[j] = r;
+		buf[j] = g;
+		buf[j] = b;
+	    }
+	}
+	n = sendto(sockfd, buf, 540, 0, &serveraddr, serverlen);
 
 	fix_info_02x(fi->row, rowstr);
 	fix_info_02x(fi->num_rows - 1, numrowstr);
